@@ -189,6 +189,10 @@
 
   function normalizeDate(val) {
     if (!val) return null;
+    if (typeof val === 'number') {
+      // Google Sheets date serial (days since 1899-12-30)
+      return new Date(1899, 11, 30 + val);
+    }
     // Accept dd/mm/yyyy or yyyy-mm-dd or Date string
     const s = String(val).trim();
     if (!s) return null;
@@ -399,7 +403,12 @@
   function gvizToRows(resp) {
     if (!resp || !resp.table) return [];
     const cols = resp.table.cols.map(c => c.label || c.id || '');
-    const rows = resp.table.rows.map(r => r.c.map(c => (c && c.v != null) ? c.v : ''));
+    const rows = resp.table.rows.map(r => r.c.map(c => {
+      if (!c) return '';
+      if (c.v != null) return c.v;
+      if (c.f != null) return c.f;
+      return '';
+    }));
     return [cols, ...rows];
   }
 
