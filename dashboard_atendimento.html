@@ -247,16 +247,26 @@
       .sort((a,b) => b[1]-a[1]);
   }
 
+  function endOfDay(d) {
+    const e = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    e.setHours(23, 59, 59, 999);
+    return e;
+  }
+
+  function startOfDay(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
   function filterByRange(rows, mode) {
     if (state.customStart || state.customEnd) {
-      const start = state.customStart ? new Date(state.customStart) : new Date('1900-01-01');
-      const end = state.customEnd ? new Date(state.customEnd) : new Date('9999-12-31');
+      const start = state.customStart ? startOfDay(new Date(state.customStart)) : new Date('1900-01-01');
+      const end = state.customEnd ? endOfDay(new Date(state.customEnd)) : new Date('9999-12-31');
       return rows.filter(r => r.data && r.data >= start && r.data <= end);
     }
     if (!rows.length) return rows;
     const maxDate = rows.reduce((m,r) => r.data && r.data > m ? r.data : m, new Date(0));
-    const end = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
-    let start = new Date(end);
+    const end = endOfDay(maxDate);
+    let start = startOfDay(maxDate);
     if (mode === 'dia') start.setDate(end.getDate());
     if (mode === 'semana') start.setDate(end.getDate() - 6);
     if (mode === 'mes') start.setDate(end.getDate() - 29);
