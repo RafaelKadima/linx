@@ -475,7 +475,11 @@
           })).filter(r => r.data);
 
           state.rows = parsed;
-          el('status').textContent = `Atualizado: ${new Date().toLocaleString('pt-BR')}`;
+          const headerInfo = header.map(h => String(h)).join(' | ');
+          const info = parsed.length
+            ? `Atualizado: ${new Date().toLocaleString('pt-BR')} · Linhas: ${parsed.length}`
+            : `Sem dados após parse. Colunas: ${headerInfo || '—'}`;
+          el('status').textContent = info;
           render();
           resolve();
         } catch (err) {
