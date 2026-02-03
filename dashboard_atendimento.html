@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard de Atendimento (Google Sheets)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f7f4ee;
+      --card: #ffffff;
+      --ink: #1b1a17;
+      --muted: #6f6a61;
+      --accent: #b85c38;
+      --accent-2: #2d6a4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Alegreya", "Georgia", serif;
+      background: radial-gradient(circle at 10% 20%, #f6efe5 0, #f7f4ee 35%, #f3f0ea 100%);
+      color: var(--ink);
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 28px 18px 60px; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; justify-content: space-between; }
+    h1 { font-size: 32px; margin: 0; letter-spacing: .3px; }
+    .periodo { color: var(--muted); font-size: 14px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .btn {
+      font-family: "Inter", "Helvetica", sans-serif;
+      border: 1px solid #e3ddd2;
+      background: #fff;
+      color: #2b2a27;
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform .08s ease, box-shadow .08s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,.08); }
+    .btn.active { background: #b85c38; color: #fff; border-color: #b85c38; }
+
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+    .card { background: var(--card); border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.06); }
+    .kpi { grid-column: span 3; }
+    .kpi h3 { margin: 0 0 6px; font-size: 14px; color: var(--muted); font-family: "Inter", "Helvetica", sans-serif; }
+    .kpi .value { font-size: 28px; font-weight: 600; color: var(--accent); }
+    .chart { grid-column: span 6; min-height: 320px; }
+    .chart h3 { margin: 0 0 8px; font-size: 16px; }
+    .insights { grid-column: span 12; }
+    .insights ul { margin: 10px 0 0 18px; padding: 0; }
+    .insights li { margin: 6px 0; }
+    .status { font-size: 12px; color: var(--muted); }
+
+    @media (max-width: 900px) {
+      .kpi { grid-column: span 6; }
+      .chart { grid-column: span 12; }
+      header { align-items: flex-start; }
+    }
+    @media (max-width: 600px) {
+      .kpi { grid-column: span 12; }
+      h1 { font-size: 24px; }
+    }
+    @media print {
+      .toolbar { display: none; }
+      body { background: #fff; }
+      .card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Dashboard de Atendimento</h1>
+        <div class="periodo" id="periodo">Período: —</div>
+      </div>
+      <div class="toolbar">
+        <button class="btn" id="btn-dia">Dia</button>
+        <button class="btn" id="btn-semana">Semana</button>
+        <button class="btn active" id="btn-mes">Mês</button>
+        <input class="btn" type="date" id="date-start" />
+        <input class="btn" type="date" id="date-end" />
+        <button class="btn" id="btn-pdf">Baixar PDF</button>
+        <button class="btn" id="btn-atualizar">Atualizar</button>
+        <span class="status" id="status">—</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card kpi"><h3>Total de atendimentos</h3><div class="value" id="kpi-total">—</div></div>
+      <div class="card kpi"><h3>Tempo total (min)</h3><div class="value" id="kpi-total-min">—</div></div>
+      <div class="card kpi"><h3>Tempo médio (min)</h3><div class="value" id="kpi-avg">—</div></div>
+      <div class="card kpi"><h3>P90 duração (min)</h3><div class="value" id="kpi-p90">—</div></div>
+
+      <div class="card chart">
+        <h3>Atendimentos por dia</h3>
+        <canvas id="c_by_day"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Atendimentos por solucionador</h3>
+        <canvas id="c_by_sol"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Duração média por solucionador (min)</h3>
+        <canvas id="c_by_sol_avg"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Tipos de atendimento</h3>
+        <canvas id="c_by_atend"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Atendimentos por revenda</h3>
+        <canvas id="c_by_rev"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Quem entrou em contato</h3>
+        <canvas id="c_by_contato"></canvas>
+      </div>
+      <div class="card chart">
+        <h3>Distribuição de duração (min)</h3>
+        <canvas id="c_by_hist"></canvas>
+      </div>
+
+      <div class="card insights">
+        <h3>Insights rápidos</h3>
+        <ul id="insights"></ul>
+      </div>
+    </section>
+  </div>
+
+<script>
+  const SHEET_GID = '1803910768';
+  const SHEET_DOC_ID = '1Rr2MtDpREWf2Ii55XEUg3RaQLUJ9Fa9ZuBBrU0aFcQ0';
+  const SHEET_PUB_ID = '2PACX-1vTZStv6uQFYwf8EVA8HooYyRYWovnc9I74OfqTpflmim1HvOWpd-4gl6SDvDYYB9KpDaRGb6tQ4THJi';
+  const SHEET_GVIZ_URLS = [
+    `https://docs.google.com/spreadsheets/d/${SHEET_DOC_ID}/gviz/tq?gid=${SHEET_GID}&tqx=out:json`,
+    `https://docs.google.com/spreadsheets/d/e/${SHEET_PUB_ID}/gviz/tq?gid=${SHEET_GID}&tqx=out:json`
+  ];
+
+  const state = {
+    rows: [],
+    filter: 'mes',
+    charts: {},
+    customStart: null,
+    customEnd: null
+  };
+
+  const el = (id) => document.getElementById(id);
+
+  function detectDelimiter(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    const sample = lines[0] || '';
+    const candidates = [',',';','\t'];
+    let best = ',', bestCount = -1;
+    for (const d of candidates) {
+      const count = (sample.match(new RegExp(`\\${d}`, 'g')) || []).length;
+      if (count > bestCount) { bestCount = count; best = d; }
+    }
+    return best;
+  }
+
+  function parseCSV(text) {
+    const delimiter = detectDelimiter(text);
+    const rows = [];
+    let row = [];
+    let value = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      const next = text[i + 1];
+
+      if (c === '"') {
+        if (inQuotes && next === '"') { value += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (c === delimiter && !inQuotes) {
+        row.push(value); value = '';
+      } else if ((c === '\n' || c === '\r') && !inQuotes) {
+        if (value !== '' || row.length) { row.push(value); rows.push(row); }
+        row = []; value = '';
+        if (c === '\r' && next === '\n') i++;
+      } else {
+        value += c;
+      }
+    }
+    if (value !== '' || row.length) { row.push(value); rows.push(row); }
+    return rows;
+  }
+
+  function normalizeDate(val) {
+    if (!val) return null;
+    // Accept dd/mm/yyyy or yyyy-mm-dd or Date string
+    const s = String(val).trim();
+    if (!s) return null;
+    // Google GViz date format: Date(YYYY,MM,DD)
+    const m = s.match(/^Date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)/i);
+    if (m) {
+      const y = parseInt(m[1], 10);
+      const mm = parseInt(m[2], 10);
+      const d = parseInt(m[3], 10);
+      return new Date(y, mm, d);
+    }
+    if (s.includes('/')) {
+      const [d,m,y] = s.split('/').map(v => parseInt(v,10));
+      if (!y) return null;
+      return new Date(y, (m||1)-1, d||1);
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  function toNumber(val) {
+    if (val == null) return null;
+    const s = String(val).replace(',', '.').replace(/[^0-9.\-]/g, '').trim();
+    if (!s) return null;
+    const n = Number(s);
+    return isNaN(n) ? null : n;
+  }
+
+  function normalizeName(val) {
+    if (!val) return '';
+    const s = String(val).trim();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+  }
+
+  function groupCount(rows, key) {
+    const map = new Map();
+    rows.forEach(r => {
+      const k = r[key] || 'N/A';
+      map.set(k, (map.get(k) || 0) + 1);
+    });
+    return Array.from(map.entries()).sort((a,b) => b[1]-a[1]);
+  }
+
+  function groupAvg(rows, key, valKey) {
+    const map = new Map();
+    rows.forEach(r => {
+      const k = r[key] || 'N/A';
+      const v = r[valKey];
+      if (v == null) return;
+      if (!map.has(k)) map.set(k, {sum:0, count:0});
+      const obj = map.get(k);
+      obj.sum += v; obj.count += 1;
+    });
+    return Array.from(map.entries())
+      .map(([k,v]) => [k, v.count ? (v.sum/v.count) : 0])
+      .sort((a,b) => b[1]-a[1]);
+  }
+
+  function filterByRange(rows, mode) {
+    if (state.customStart || state.customEnd) {
+      const start = state.customStart ? new Date(state.customStart) : new Date('1900-01-01');
+      const end = state.customEnd ? new Date(state.customEnd) : new Date('9999-12-31');
+      return rows.filter(r => r.data && r.data >= start && r.data <= end);
+    }
+    if (!rows.length) return rows;
+    const maxDate = rows.reduce((m,r) => r.data && r.data > m ? r.data : m, new Date(0));
+    const end = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
+    let start = new Date(end);
+    if (mode === 'dia') start.setDate(end.getDate());
+    if (mode === 'semana') start.setDate(end.getDate() - 6);
+    if (mode === 'mes') start.setDate(end.getDate() - 29);
+
+    return rows.filter(r => r.data && r.data >= start && r.data <= end);
+  }
+
+  function formatDate(d) {
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yy = d.getFullYear();
+    return `${dd}/${mm}/${yy}`;
+  }
+
+  function updateKPIs(rows) {
+    const total = rows.length;
+    const durations = rows.map(r => r.duracao).filter(v => v != null);
+    const totalMin = durations.reduce((a,b) => a+b, 0);
+    const avg = durations.length ? totalMin / durations.length : 0;
+    const sorted = durations.slice().sort((a,b) => a-b);
+    const p90 = sorted.length ? sorted[Math.floor(0.9*(sorted.length-1))] : 0;
+
+    el('kpi-total').textContent = total;
+    el('kpi-total-min').textContent = Math.round(totalMin);
+    el('kpi-avg').textContent = avg.toFixed(1);
+    el('kpi-p90').textContent = Math.round(p90);
+  }
+
+  function updateInsights(rows) {
+    const ul = el('insights');
+    ul.innerHTML = '';
+    if (!rows.length) return;
+
+    const durations = rows.map(r => r.duracao).filter(v => v != null);
+    const missing = rows.length - durations.length;
+    const bySol = groupCount(rows, 'solucionador');
+    const byAt = groupCount(rows, 'atendimento');
+    const byRev = groupCount(rows, 'revenda');
+
+    const items = [];
+    items.push(`Total de atendimentos no período: ${rows.length}.`);
+    if (durations.length) {
+      const totalMin = durations.reduce((a,b)=>a+b,0);
+      const avg = totalMin / durations.length;
+      items.push(`Tempo médio: ${avg.toFixed(1)} min. Registros sem duração: ${missing}.`);
+    }
+    if (bySol.length) items.push(`Maior volume por solucionador: ${bySol[0][0]} (${bySol[0][1]}).`);
+    if (byAt.length) items.push(`Tipo de atendimento mais comum: ${byAt[0][0]} (${byAt[0][1]}).`);
+    if (byRev.length) items.push(`Revenda com mais atendimentos: ${byRev[0][0]} (${byRev[0][1]}).`);
+
+    items.forEach(t => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      ul.appendChild(li);
+    });
+  }
+
+  function buildChart(ctxId, type, labels, values, color, fill=false) {
+    const ctx = document.getElementById(ctxId);
+    return new Chart(ctx, {
+      type,
+      data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: fill ? color.replace('1)', '.2)') : color, fill }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  function updateCharts(rows) {
+    const byDayMap = new Map();
+    rows.forEach(r => {
+      const key = r.data ? r.data.toISOString().slice(0,10) : 'N/A';
+      byDayMap.set(key, (byDayMap.get(key) || 0) + 1);
+    });
+    const byDay = Array.from(byDayMap.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+
+    const bySol = groupCount(rows, 'solucionador');
+    const bySolAvg = groupAvg(rows, 'solucionador', 'duracao');
+    const byAt = groupCount(rows, 'atendimento');
+    const byRev = groupCount(rows, 'revenda');
+    const byContato = groupCount(rows, 'contato');
+
+    const durations = rows.map(r => r.duracao).filter(v => v != null);
+    const bins = [0,5,10,15,30,60,120,240,1000];
+    const histLabels = [];
+    const histValues = Array(bins.length-1).fill(0);
+    for (let i=0; i<bins.length-1; i++) histLabels.push(`(${bins[i]}, ${bins[i+1]}]`);
+    durations.forEach(v => {
+      for (let i=0; i<bins.length-1; i++) {
+        if (v > bins[i] && v <= bins[i+1]) { histValues[i]++; break; }
+      }
+    });
+
+    const charts = state.charts;
+    const upd = (chart, labels, values) => { chart.data.labels = labels; chart.data.datasets[0].data = values; chart.update(); };
+
+    if (!charts.byDay) {
+      charts.byDay = buildChart('c_by_day', 'line', byDay.map(d=>d[0]), byDay.map(d=>d[1]), 'rgba(184,92,56,1)', true);
+      charts.bySol = buildChart('c_by_sol', 'bar', bySol.map(d=>d[0]), bySol.map(d=>d[1]), 'rgba(45,106,79,1)');
+      charts.bySolAvg = buildChart('c_by_sol_avg', 'bar', bySolAvg.map(d=>d[0]), bySolAvg.map(d=>d[1]), 'rgba(29,53,87,1)');
+      charts.byAt = buildChart('c_by_atend', 'bar', byAt.map(d=>d[0]), byAt.map(d=>d[1]), 'rgba(224,159,62,1)');
+      charts.byRev = buildChart('c_by_rev', 'bar', byRev.map(d=>d[0]), byRev.map(d=>d[1]), 'rgba(106,76,147,1)');
+      charts.byContato = buildChart('c_by_contato', 'bar', byContato.map(d=>d[0]), byContato.map(d=>d[1]), 'rgba(56,102,65,1)');
+      charts.byHist = buildChart('c_by_hist', 'bar', histLabels, histValues, 'rgba(188,108,37,1)');
+    } else {
+      upd(charts.byDay, byDay.map(d=>d[0]), byDay.map(d=>d[1]));
+      upd(charts.bySol, bySol.map(d=>d[0]), bySol.map(d=>d[1]));
+      upd(charts.bySolAvg, bySolAvg.map(d=>d[0]), bySolAvg.map(d=>d[1]));
+      upd(charts.byAt, byAt.map(d=>d[0]), byAt.map(d=>d[1]));
+      upd(charts.byRev, byRev.map(d=>d[0]), byRev.map(d=>d[1]));
+      upd(charts.byContato, byContato.map(d=>d[0]), byContato.map(d=>d[1]));
+      upd(charts.byHist, histLabels, histValues);
+    }
+  }
+
+  function render() {
+    const filtered = filterByRange(state.rows, state.filter);
+    updateKPIs(filtered);
+    updateInsights(filtered);
+    updateCharts(filtered);
+
+    if (filtered.length) {
+      const min = filtered.reduce((m,r)=>r.data && r.data<m ? r.data:m, new Date('9999-12-31'));
+      const max = filtered.reduce((m,r)=>r.data && r.data>m ? r.data:m, new Date(0));
+      el('periodo').textContent = `Período: ${formatDate(min)} a ${formatDate(max)}`;
+    } else {
+      el('periodo').textContent = 'Período: —';
+    }
+  }
+
+
+  function gvizToRows(resp) {
+    if (!resp || !resp.table) return [];
+    const cols = resp.table.cols.map(c => c.label || c.id || '');
+    const rows = resp.table.rows.map(r => r.c.map(c => (c && c.v != null) ? c.v : ''));
+    return [cols, ...rows];
+  }
+
+  function loadData() {
+    el('status').textContent = 'Carregando…';
+    return new Promise((resolve, reject) => {
+      const previous = document.getElementById('gviz-script');
+      if (previous) previous.remove();
+
+      window.google = window.google || {};
+      window.google.visualization = window.google.visualization || {};
+      window.google.visualization.Query = window.google.visualization.Query || {};
+      window.google.visualization.Query.setResponse = (resp) => {
+        try {
+          const rows = gvizToRows(resp);
+          const header = rows.shift() || [];
+
+          const normalizeHeader = (h) => (h || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/^\ufeff/, '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')  // remove acentos
+            .replace(/\s+/g, ' ');
+
+          const headerMap = new Map();
+          header.forEach((h, i) => headerMap.set(normalizeHeader(h), i));
+
+          const findIdx = (candidates) => {
+            for (const c of candidates) {
+              const key = normalizeHeader(c);
+              if (headerMap.has(key)) return headerMap.get(key);
+            }
+            return -1;
+          };
+
+          const findIdxContains = (needle) => {
+            const n = normalizeHeader(needle);
+            for (const [k, v] of headerMap.entries()) {
+              if (k.includes(n)) return v;
+            }
+            return -1;
+          };
+
+          let iData = findIdx(['Data', 'Data atendimento', 'Data do atendimento']);
+          const iSol = findIdx(['Solucionador', 'Solucionador(a)', 'Responsavel', 'Responsável']);
+          const iAtend = findIdx(['Atendimento', 'Tipo de atendimento', 'Tipo atendimento']);
+          const iSolucao = findIdx(['Solução', 'Solucao', 'Solucao aplicada']);
+          const iRev = findIdx(['Revenda', 'Filial', 'Loja']);
+          const iContato = findIdx(['Quem entrou em contato', 'Contato', 'Quem entrou em contato?']);
+          const iDur = findIdx(['Duração do atendimento minutos', 'Duracao do atendimento minutos', 'Duração do atendimento', 'Duracao do atendimento', 'Tempo do atendimento', 'Tempo atendimento']);
+
+          if (iData < 0) iData = findIdxContains('data');
+
+          const parsed = rows.map(r => ({
+            data: normalizeDate(r[iData]),
+            solucionador: normalizeName(r[iSol]),
+            atendimento: (r[iAtend] || '').trim(),
+            solucao: (r[iSolucao] || '').trim(),
+            revenda: (r[iRev] || '').trim(),
+            contato: (r[iContato] || '').trim(),
+            duracao: toNumber(r[iDur])
+          })).filter(r => r.data);
+
+          state.rows = parsed;
+          el('status').textContent = `Atualizado: ${new Date().toLocaleString('pt-BR')}`;
+          render();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      let idx = 0;
+      const tryLoad = () => {
+        const script = document.createElement('script');
+        script.id = 'gviz-script';
+        script.src = SHEET_GVIZ_URLS[idx];
+        script.onerror = () => {
+          script.remove();
+          idx += 1;
+          if (idx < SHEET_GVIZ_URLS.length) return tryLoad();
+          el('status').textContent = 'Falha ao carregar dados (verifique permissao/aba).';
+          reject(new Error('Falha ao carregar dados do Google Sheets'));
+        };
+        document.body.appendChild(script);
+      };
+
+      tryLoad();
+    });
+  }
+  function setFilter(mode) {
+    state.filter = mode;
+    state.customStart = null;
+    state.customEnd = null;
+    el('date-start').value = '';
+    el('date-end').value = '';
+    ['dia','semana','mes'].forEach(m => el(`btn-${m}`).classList.toggle('active', m===mode));
+    render();
+  }
+
+  function setCustomRange() {
+    const startVal = el('date-start').value;
+    const endVal = el('date-end').value;
+    state.customStart = startVal || null;
+    state.customEnd = endVal || null;
+    ['dia','semana','mes'].forEach(m => el(`btn-${m}`).classList.remove('active'));
+    render();
+  }
+
+  el('btn-dia').addEventListener('click', () => setFilter('dia'));
+  el('btn-semana').addEventListener('click', () => setFilter('semana'));
+  el('btn-mes').addEventListener('click', () => setFilter('mes'));
+  el('date-start').addEventListener('change', setCustomRange);
+  el('date-end').addEventListener('change', setCustomRange);
+  el('btn-pdf').addEventListener('click', () => window.print());
+  el('btn-atualizar').addEventListener('click', loadData);
+
+  loadData();
+</script>
+</body>
+</html>
